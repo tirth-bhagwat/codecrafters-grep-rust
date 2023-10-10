@@ -4,6 +4,7 @@ use std::process;
 
 enum Mode {
     SameCharacter(char),
+    Alphanumeric,
     Number,
     None,
     Unknown,
@@ -19,8 +20,12 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
             mode = Mode::SameCharacter(x);
         } else if x == '\\' {
             if let Some(u) = patt.next() {
-                if u == 'd' {
-                    mode = Mode::Number
+                match u {
+                    'w' => mode = Mode::Alphanumeric,
+                    'd' => mode = Mode::Number,
+                    _ => {
+                        return false;
+                    }
                 }
             }
         }
@@ -29,6 +34,15 @@ fn match_pattern(input_line: &str, pattern: &str) -> bool {
             Mode::SameCharacter(ch) => {
                 if let Some(x) = inp.next() {
                     if !x.is_ascii_alphabetic() || x != ch {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            Mode::Alphanumeric => {
+                if let Some(x) = inp.next() {
+                    if !(x.is_ascii_alphanumeric() || x == '_') {
                         return false;
                     }
                 } else {
