@@ -5,7 +5,8 @@ use std::process;
 enum Mode {
     SameCharacter(char),
     Alphanumeric,
-    CharGroup(Vec<char>),
+    PosCharGroup(Vec<char>),
+    NegCharGroup(Vec<char>),
     Number,
     Unknown,
 }
@@ -31,8 +32,28 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                 }
             }
             '[' => {
-                let accepted: Vec<char> = (&mut patt).take_while(|ch| *ch != ']').collect();
-                mode = Mode::CharGroup(accepted);
+                let mut accepted: Vec<char> = vec![];
+                let mut pos = true;
+
+                if let Some(ch) = patt.next() {
+                    if ch == '^' {
+                        pos = false;
+                    } else {
+                        accepted.push(ch);
+                    }
+                }
+
+                accepted.append(
+                    (&mut patt)
+                        .take_while(|ch| *ch != ']')
+                        .collect::<Vec<char>>()
+                        .as_mut(),
+                );
+                if pos {
+                    mode = Mode::PosCharGroup(accepted);
+                } else {
+                    mode = Mode::NegCharGroup(accepted);
+                }
             }
 
             x if x.is_ascii_alphabetic() => {
@@ -45,10 +66,10 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
         }
 
         loop {
-            if let Some(x) = inp.next() {
+            if let Some(y) = inp.next() {
                 match &mode {
                     Mode::SameCharacter(ch) => {
-                        if x.is_ascii_alphabetic() && &x == ch {
+                        if y.is_ascii_alphabetic() && &y == ch {
                             match_only_next = true;
                             break;
                         } else if match_only_next {
@@ -56,15 +77,23 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         }
                     }
                     Mode::Alphanumeric => {
-                        if x.is_ascii_alphanumeric() || x == '_' {
+                        if y.is_ascii_alphanumeric() || y == '_' {
                             match_only_next = true;
                             break;
                         } else if match_only_next {
                             return false;
                         }
                     }
-                    Mode::CharGroup(accepted) => {
-                        if accepted.contains(&x) {
+                    Mode::PosCharGroup(accepted) => {
+                        if accepted.contains(&y) {
+                            match_only_next = true;
+                            break;
+                        } else if match_only_next {
+                            return false;
+                        }
+                    }
+                    Mode::NegCharGroup(not_accepted) => {
+                        if !not_accepted.contains(&y){
                             match_only_next = true;
                             break;
                         } else if match_only_next {
@@ -72,7 +101,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         }
                     }
                     Mode::Number => {
-                        if x.is_ascii_digit() {
+                        if y.is_ascii_digit() {
                             match_only_next = true;
                             break;
                         } else if match_only_next {
@@ -118,7 +147,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_match() {
+    fn test_stage_1() {
         assert_eq!(match_pattern("abc", "abc"), true, "Test 1");
         assert_eq!(match_pattern("abc", "aibic"), false, "Test 2");
         assert_eq!(match_pattern("abc", "aaibicj"), false, "Test 3");
@@ -161,5 +190,17 @@ mod tests {
         assert_eq!(match_pattern("[aeiou]", "rhythm"), false, "Test 5");
         // assert_eq!(match_pattern("[a-z]", "abcdefg"), true, "Extra_1");
         // assert_eq!(match_pattern("[0-9]", "alpha123"), true, "Extra_2");
+    }
+
+    #[test]
+    fn test_stage_5() {
+        assert_eq!(match_pattern("[^abc]", "dog"), true, "Test 1");
+        assert_eq!(match_pattern("[^abc]", "cab"), false, "Test 2");
+        assert_eq!(match_pattern("[^pqr]", "apple"), true, "Test 3");
+        assert_eq!(match_pattern("[^aeiou][^aeiou]", "consonants"), false, "Test 4");
+        assert_eq!(match_pattern("[^aeiou]", "rhythm"), true, "Test 5");
+        assert_eq!(match_pattern("[^123]", "456"), true, "Test 6");
+        // assert_eq!(match_pattern("[^a-z]", "123"), true, "Extra_1");
+        // assert_eq!(match_pattern("[^0-9]", "alpha"), true, "Extra_2");
     }
 }
