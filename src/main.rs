@@ -56,12 +56,8 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                 }
             }
 
-            x if x.is_ascii_alphabetic() => {
-                mode = Mode::SameCharacter(x);
-            }
-
             _ => {
-                return false;
+                mode = Mode::SameCharacter(x);
             }
         }
 
@@ -69,7 +65,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
             if let Some(y) = inp.next() {
                 match &mode {
                     Mode::SameCharacter(ch) => {
-                        if y.is_ascii_alphabetic() && &y == ch {
+                        if &y == ch {
                             match_only_next = true;
                             break;
                         } else if match_only_next {
@@ -93,7 +89,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         }
                     }
                     Mode::NegCharGroup(not_accepted) => {
-                        if !not_accepted.contains(&y){
+                        if !not_accepted.contains(&y) {
                             match_only_next = true;
                             break;
                         } else if match_only_next {
@@ -197,10 +193,34 @@ mod tests {
         assert_eq!(match_pattern("[^abc]", "dog"), true, "Test 1");
         assert_eq!(match_pattern("[^abc]", "cab"), false, "Test 2");
         assert_eq!(match_pattern("[^pqr]", "apple"), true, "Test 3");
-        assert_eq!(match_pattern("[^aeiou][^aeiou]", "consonants"), false, "Test 4");
+        assert_eq!(
+            match_pattern("[^aeiou][^aeiou]", "consonants"),
+            false,
+            "Test 4"
+        );
         assert_eq!(match_pattern("[^aeiou]", "rhythm"), true, "Test 5");
         assert_eq!(match_pattern("[^123]", "456"), true, "Test 6");
         // assert_eq!(match_pattern("[^a-z]", "123"), true, "Extra_1");
         // assert_eq!(match_pattern("[^0-9]", "alpha"), true, "Extra_2");
+    }
+
+    #[test]
+    fn test_stage_6() {
+        assert_eq!(match_pattern("\\d apple", "1 apple"), true, "Test 1");
+        assert_eq!(match_pattern("\\d apple", "1 orange"), false, "Test 2");
+        assert_eq!(
+            match_pattern("\\d\\d\\d apple", "100 apples"),
+            true,
+            "Test 3"
+        );
+        assert_eq!(match_pattern("\\d\\d\\d apple", "1 apple"), false, "Test 4");
+        assert_eq!(match_pattern("\\d \\w\\w\\ws", "3 dogs"), true, "Test 5");
+        assert_eq!(match_pattern("\\d \\w\\w\\ws", "4 cats"), true, "Test 6");
+        assert_eq!(match_pattern("\\d \\w\\w\\ws", "1 dog"), false, "Test 7");
+        assert_eq!(
+            match_pattern("\\d\\w\\w\\w apple", "1dog apple"),
+            true,
+            "Test 8"
+        );
     }
 }
