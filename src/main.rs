@@ -2,18 +2,62 @@ use std::env;
 use std::io;
 use std::process;
 
+enum Mode {
+    SameCharacter(char),
+    Number,
+    None,
+    Unknown,
+}
+
 fn match_pattern(input_line: &str, pattern: &str) -> bool {
-    if pattern.chars().count() == 1 {
-        return input_line.contains(pattern);
-    } else {
-        panic!("Unhandled pattern: {}", pattern)
+    let mut inp = input_line.chars();
+    let mut patt = pattern.chars();
+    let mut mode = Mode::Unknown;
+
+    while let Some(x) = patt.next() {
+        if x.is_ascii_alphabetic() {
+            mode = Mode::SameCharacter(x);
+        } else if x == '\\' {
+            if let Some(u) = patt.next() {
+                if u == 'd' {
+                    mode = Mode::Number
+                }
+            }
+        }
+
+        match mode {
+            Mode::SameCharacter(ch) => {
+                if let Some(x) = inp.next() {
+                    if !x.is_ascii_alphabetic() || x != ch {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            Mode::Number => {
+                if let Some(x) = inp.next() {
+                    if !x.is_ascii_digit() {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
     }
+
+    true
 }
 
 // Usage: echo <input_text> | your_grep.sh -E <pattern>
 fn main() {
+    if env::args().len() < 3 {
+        process::exit(1);
+    }
+
     if env::args().nth(1).unwrap() != "-E" {
-        println!("Expected first argument to be '-E'");
         process::exit(1);
     }
 
@@ -23,8 +67,10 @@ fn main() {
     io::stdin().read_line(&mut input_line).unwrap();
 
     if match_pattern(&input_line, &pattern) {
+        println!("Pass");
         process::exit(0)
     } else {
+        println!("Fail");
         process::exit(1)
     }
 }
