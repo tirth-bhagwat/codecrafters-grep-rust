@@ -5,63 +5,87 @@ use std::process;
 enum Mode {
     SameCharacter(char),
     Alphanumeric,
+    CharGroup(Vec<char>),
     Number,
-    None,
     Unknown,
 }
 
-fn match_pattern(input_line: &str, pattern: &str) -> bool {
+fn match_pattern(pattern: &str, input_line: &str) -> bool {
     let mut inp = input_line.chars();
     let mut patt = pattern.chars();
     let mut mode = Mode::Unknown;
 
+    let mut match_only_next = false;
+
     while let Some(x) = patt.next() {
-        if x.is_ascii_alphabetic() {
-            mode = Mode::SameCharacter(x);
-        } else if x == '\\' {
-            if let Some(u) = patt.next() {
-                match u {
-                    'w' => mode = Mode::Alphanumeric,
-                    'd' => mode = Mode::Number,
-                    _ => {
-                        return false;
+        match x {
+            '\\' => {
+                if let Some(u) = patt.next() {
+                    match u {
+                        'w' => mode = Mode::Alphanumeric,
+                        'd' => mode = Mode::Number,
+                        _ => {
+                            return false;
+                        }
                     }
                 }
+            }
+            '[' => {
+                let accepted: Vec<char> = (&mut patt).take_while(|ch| *ch != ']').collect();
+                mode = Mode::CharGroup(accepted);
+            }
+
+            x if x.is_ascii_alphabetic() => {
+                mode = Mode::SameCharacter(x);
+            }
+
+            _ => {
+                return false;
             }
         }
 
-        match mode {
-            Mode::SameCharacter(ch) => {
-                if let Some(x) = inp.next() {
-                    if !x.is_ascii_alphabetic() || x != ch {
-                        return false;
+        loop {
+            if let Some(x) = inp.next() {
+                match &mode {
+                    Mode::SameCharacter(ch) => {
+                        if x.is_ascii_alphabetic() && &x == ch {
+                            match_only_next = true;
+                            break;
+                        } else if match_only_next {
+                            return false;
+                        }
                     }
-                } else {
-                    return false;
-                }
-            }
-            Mode::Alphanumeric => {
-                if let Some(x) = inp.next() {
-                    if !(x.is_ascii_alphanumeric() || x == '_') {
-                        return false;
+                    Mode::Alphanumeric => {
+                        if x.is_ascii_alphanumeric() || x == '_' {
+                            match_only_next = true;
+                            break;
+                        } else if match_only_next {
+                            return false;
+                        }
                     }
-                } else {
-                    return false;
-                }
-            }
-            Mode::Number => {
-                if let Some(x) = inp.next() {
-                    if !x.is_ascii_digit() {
-                        return false;
+                    Mode::CharGroup(accepted) => {
+                        if accepted.contains(&x) {
+                            match_only_next = true;
+                            break;
+                        } else if match_only_next {
+                            return false;
+                        }
                     }
-                } else {
-                    return false;
+                    Mode::Number => {
+                        if x.is_ascii_digit() {
+                            match_only_next = true;
+                            break;
+                        } else if match_only_next {
+                            return false;
+                        }
+                    }
+                    Mode::Unknown => return false,
                 }
+            } else {
+                return false;
             }
-            _ => return false,
         }
     }
-
     true
 }
 
@@ -80,11 +104,62 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if match_pattern(&input_line, &pattern) {
+    if match_pattern(&pattern, &input_line) {
         println!("Pass");
         process::exit(0)
     } else {
         println!("Fail");
         process::exit(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_match() {
+        assert_eq!(match_pattern("abc", "abc"), true, "Test 1");
+        assert_eq!(match_pattern("abc", "aibic"), false, "Test 2");
+        assert_eq!(match_pattern("abc", "aaibicj"), false, "Test 3");
+        assert_eq!(match_pattern("abc", "abcdef"), true, "Test 4");
+        assert_eq!(match_pattern("abc", "defabc"), true, "Test 5");
+        assert_eq!(match_pattern("abc", "defabcdef"), true, "Test 6");
+    }
+    #[test]
+    fn test_stage_2() {
+        assert_eq!(match_pattern("\\d", "12345"), true, "Test 1");
+        assert_eq!(match_pattern("\\d", "abc"), false, "Test 2");
+        assert_eq!(match_pattern("\\d", "apple123"), true, "Test 3");
+        assert_eq!(match_pattern("\\d", "123apple"), true, "Test 4");
+        assert_eq!(match_pattern("\\d", "apple"), false, "Test 5");
+        assert_eq!(match_pattern("\\d", "123"), true, "Test 6");
+        assert_eq!(match_pattern("\\d", "a1b2c3"), true, "Test 7");
+        assert_eq!(match_pattern("\\d", "a1b2c"), true, "Test 8");
+    }
+
+    #[test]
+    fn test_stage_3() {
+        assert_eq!(match_pattern("\\w", "foo101"), true, "Test 1");
+        assert_eq!(match_pattern("\\w", "$!?"), false, "Test 2");
+        assert_eq!(match_pattern("\\w", "alpha-num3ric"), true, "Test 3");
+        assert_eq!(match_pattern("\\w", "_underscore"), true, "Test 4");
+        assert_eq!(match_pattern("\\w", "%:'"), false, "Test 5");
+        assert_eq!(match_pattern("\\w", "12345"), true, "Test 6");
+        assert_eq!(match_pattern("\\w", "AbC"), true, "Test 7");
+        assert_eq!(match_pattern("\\w", "_"), true, "Test 8");
+        assert_eq!(match_pattern("\\w", "a"), true, "Test 9");
+        assert_eq!(match_pattern("\\w", "9"), true, "Test 10");
+        assert_eq!(match_pattern("\\w", "!"), false, "Test 11");
+    }
+    #[test]
+    fn test_stage_4() {
+        assert_eq!(match_pattern("[abc]", "apple"), true, "Test 1");
+        assert_eq!(match_pattern("[123]", "apple"), false, "Test 2");
+        assert_eq!(match_pattern("[xyz]", "XYZ"), false, "Test 3");
+        assert_eq!(match_pattern("[aeiou]", "consonants"), true, "Test 4");
+        assert_eq!(match_pattern("[aeiou]", "rhythm"), false, "Test 5");
+        // assert_eq!(match_pattern("[a-z]", "abcdefg"), true, "Extra_1");
+        // assert_eq!(match_pattern("[0-9]", "alpha123"), true, "Extra_2");
     }
 }
