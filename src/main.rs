@@ -1,6 +1,7 @@
 use std::env;
 use std::io;
 use std::process;
+use std::str::Chars;
 
 enum Mode {
     SameCharacter(char),
@@ -20,45 +21,17 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
 
     while let Some(x) = patt.next() {
         match x {
-            '\\' => {
-                if let Some(u) = patt.next() {
-                    match u {
-                        'w' => mode = Mode::Alphanumeric,
-                        'd' => mode = Mode::Number,
-                        _ => {
-                            return false;
-                        }
-                    }
-                }
+            '^' => {
+                match_only_next = true;
+                continue;
             }
-            '[' => {
-                let mut accepted: Vec<char> = vec![];
-                let mut pos = true;
+            _ => {}
+        }
 
-                if let Some(ch) = patt.next() {
-                    if ch == '^' {
-                        pos = false;
-                    } else {
-                        accepted.push(ch);
-                    }
-                }
-
-                accepted.append(
-                    (&mut patt)
-                        .take_while(|ch| *ch != ']')
-                        .collect::<Vec<char>>()
-                        .as_mut(),
-                );
-                if pos {
-                    mode = Mode::PosCharGroup(accepted);
-                } else {
-                    mode = Mode::NegCharGroup(accepted);
-                }
-            }
-
-            _ => {
-                mode = Mode::SameCharacter(x);
-            }
+        if let Some(m) = set_mode(&mut patt, x) {
+            mode = m;
+        } else {
+            return false;
         }
 
         loop {
@@ -136,6 +109,47 @@ fn main() {
         println!("Fail");
         process::exit(1)
     }
+}
+
+fn set_mode(mut patt: &mut Chars, x: char) -> Option<Mode> {
+    return match x {
+        '\\' => {
+            if let Some(u) = patt.next() {
+                return match u {
+                    'w' => Some(Mode::Alphanumeric),
+                    'd' => Some(Mode::Number),
+                    _ => None,
+                };
+            }
+            None
+        }
+        '[' => {
+            let mut accepted: Vec<char> = vec![];
+            let mut pos = true;
+
+            if let Some(ch) = patt.next() {
+                if ch == '^' {
+                    pos = false;
+                } else {
+                    accepted.push(ch);
+                }
+            }
+
+            accepted.append(
+                (&mut patt)
+                    .take_while(|ch| *ch != ']')
+                    .collect::<Vec<char>>()
+                    .as_mut(),
+            );
+            if pos {
+                Some(Mode::PosCharGroup(accepted))
+            } else {
+                Some(Mode::NegCharGroup(accepted))
+            }
+        }
+
+        _ => Some(Mode::SameCharacter(x)),
+    };
 }
 
 #[cfg(test)]
@@ -222,5 +236,17 @@ mod tests {
             true,
             "Test 8"
         );
+    }
+
+    #[test]
+    fn test_stage_7() {
+        assert_eq!(match_pattern("^log", "log"), true, "Test 1");
+        assert_eq!(match_pattern("^log", "slog"), false, "Test 2");
+        assert_eq!(match_pattern("^apple", "apple pie"), true, "Test 3");
+        assert_eq!(match_pattern("^apple", "pie apple"), false, "Test 4");
+        assert_eq!(match_pattern("^123", "123456"), true, "Test 5");
+        assert_eq!(match_pattern("^123", "456123"), false, "Test 6");
+        // assert_eq!(match_pattern("^ab", "abcd\nefgh"), true, "Test 7");
+        // assert_eq!(match_pattern("^cd", "abcd\nefgh"), false, "Test 8");
     }
 }
