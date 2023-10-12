@@ -42,6 +42,9 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
             '$' => {
                 return if chars_matched > 0 && j >= inp_len {
                     true
+                } else if j < inp_len {
+                    reset_pattern = true;
+                    continue;
                 } else {
                     false
                 }
@@ -319,12 +322,29 @@ mod tests {
     #[test]
     fn test_stage_8() {
         assert_eq!(match_pattern("dog$", "dog"), true, "Test 1");
+        assert_eq!(match_pattern("^dog$", "dog"), true, "Test 1a");
         assert_eq!(match_pattern("dog$", "dogs"), false, "Test 2");
         assert_eq!(match_pattern("pie$", "apple pie"), true, "Test 3");
+        assert_eq!(match_pattern("^pie$", "apple pie"), false, "Test 3a");
         assert_eq!(match_pattern("apple$", "pie apple"), true, "Test 4");
+        assert_eq!(match_pattern("apple$", "pie apple appl"), false, "Test 4a");
+        assert_eq!(match_pattern("apple$", "pie apple apple"), true, "Test 4b");
         assert_eq!(match_pattern("123$", "123456"), false, "Test 5");
         assert_eq!(match_pattern("123$", "456123"), true, "Test 6");
         assert_eq!(match_pattern("efgh$", "abcd\nefgh"), true, "Test 7");
         assert_eq!(match_pattern("abcd$", "abcd\nefgh"), false, "Test 8");
     }
+
+    // #[test]
+    // fn test_stage_9() {
+    //     assert_eq!(match_pattern("a+", "apple"), true, "Test 1");
+    //     assert_eq!(match_pattern("a+", "SaaS"), true, "Test 2");
+    //     assert_eq!(match_pattern("a+", "dog"), false, "Test 3");
+    //     assert_eq!(match_pattern("ca+ts", "cats"), true, "Test 4");
+    //     assert_eq!(match_pattern("ca+ts", "caats"), true, "Test 5");
+    //     assert_eq!(match_pattern("ca+ts", "caaaats"), true, "Test 6");
+    //     assert_eq!(match_pattern("ca+ts", "ctss"), false, "Test 7");
+    //     assert_eq!(match_pattern("ca+ts", "cass caats"), true, "Test 8");
+    //     // assert_eq!(match_pattern("^ca+ts", "cass caats"), false, "Test 9");
+    // }
 }
