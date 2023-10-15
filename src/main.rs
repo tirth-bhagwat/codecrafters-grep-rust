@@ -8,7 +8,11 @@ enum Mode {
     PosCharGroup(Vec<char>),
     NegCharGroup(Vec<char>),
     Number,
-    Unknown,
+}
+#[derive(PartialEq)]
+enum MultipleMatch {
+    OneOrMore,
+    One,
 }
 
 fn match_pattern(pattern: &str, input_line: &str) -> bool {
@@ -51,90 +55,119 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
             }
             _ => {}
         }
-        match get_mode(&mut patt, x, &mut i) {
-            Some(m) => loop {
+
+        let mut multi_match = MultipleMatch::One;
+        if i < patt_len {
+            multi_match = match patt[i] {
+                '+' => {
+                    i += 1;
+                    MultipleMatch::OneOrMore
+                }
+                _ => MultipleMatch::One,
+            };
+        }
+
+        let mut matched = 0_usize;
+        'outer: while let Some(mode) = get_mode(&mut patt, x, &mut i) {
+            let tmp = 'inner: loop {
                 if j < inp_len {
                     let y = inp[j];
                     j += 1;
-                    match &m {
+                    match &mode {
                         Mode::SameCharacter(ch) => {
                             if &y == ch {
                                 match_only_next = true;
                                 chars_matched += 1;
-                                break;
+                                break 'inner true;
                             } else if match_only_next {
-                                if chars_matched > 0 {
+                                if chars_matched > 0 && multi_match == MultipleMatch::One {
                                     reset_pattern = true;
                                     j -= 1;
-                                    break;
+                                    break 'outer;
                                 }
-                                return false;
+                                break 'inner false;
                             }
                         }
                         Mode::Alphanumeric => {
                             if y.is_ascii_alphanumeric() || y == '_' {
                                 match_only_next = true;
                                 chars_matched += 1;
-                                break;
+                                break 'inner true;
                             } else if match_only_next {
-                                if chars_matched > 0 {
+                                if chars_matched > 0 && multi_match == MultipleMatch::One {
                                     reset_pattern = true;
                                     j -= 1;
-                                    break;
+                                    break 'outer;
                                 }
-                                return false;
+                                break 'inner false;
                             }
                         }
                         Mode::PosCharGroup(accepted) => {
                             if accepted.contains(&y) {
                                 match_only_next = true;
                                 chars_matched += 1;
-                                break;
+                                break 'inner true;
                             } else if match_only_next {
-                                if chars_matched > 0 {
+                                if chars_matched > 0 && multi_match == MultipleMatch::One {
                                     reset_pattern = true;
                                     j -= 1;
-                                    break;
+                                    break 'outer;
                                 }
-                                return false;
+                                break 'inner false;
                             }
                         }
                         Mode::NegCharGroup(not_accepted) => {
                             if !not_accepted.contains(&y) {
                                 match_only_next = true;
                                 chars_matched += 1;
-                                break;
+                                break 'inner true;
                             } else if match_only_next {
-                                if chars_matched > 0 {
+                                if chars_matched > 0 && multi_match == MultipleMatch::One {
                                     reset_pattern = true;
                                     j -= 1;
-                                    break;
+                                    break 'outer;
                                 }
-                                return false;
+                                break 'inner false;
                             }
                         }
                         Mode::Number => {
                             if y.is_ascii_digit() {
                                 match_only_next = true;
                                 chars_matched += 1;
-                                break;
+                                break 'inner true;
                             } else if match_only_next {
-                                if chars_matched > 0 {
+                                if chars_matched > 0 && multi_match == MultipleMatch::One {
                                     reset_pattern = true;
                                     j -= 1;
-                                    break;
+                                    break 'outer;
                                 }
-                                return false;
+                                break 'inner false;
                             }
                         }
-                        Mode::Unknown => return false,
                     }
                 } else {
                     return false;
                 }
-            },
-            None => {
-                return false;
+            };
+
+            if tmp {
+                matched += 1;
+            }
+
+            match multi_match {
+                MultipleMatch::One => {
+                    if tmp {
+                        break 'outer;
+                    } else {
+                        return false;
+                    }
+                }
+                MultipleMatch::OneOrMore => {
+                    if matched > 0 && !tmp {
+                        j -= 1;
+                        break 'outer;
+                    }
+                }
             }
         }
     }
@@ -240,7 +273,6 @@ mod tests {
         assert_eq!(match_pattern("\\d", "a1b2c3"), true, "Test 7");
         assert_eq!(match_pattern("\\d", "a1b2c"), true, "Test 8");
     }
-
     #[test]
     fn test_stage_3() {
         assert_eq!(match_pattern("\\w", "foo101"), true, "Test 1");
@@ -270,7 +302,6 @@ mod tests {
         // assert_eq!(match_pattern("[a-z]", "abcdefg"), true, "Extra_1");
         // assert_eq!(match_pattern("[0-9]", "alpha123"), true, "Extra_2");
     }
-
     #[test]
     fn test_stage_5() {
         assert_eq!(match_pattern("[^abc]", "dog"), true, "Test 1");
@@ -286,7 +317,6 @@ mod tests {
         // assert_eq!(match_pattern("[^a-z]", "123"), true, "Extra_1");
         // assert_eq!(match_pattern("[^0-9]", "alpha"), true, "Extra_2");
     }
-
     #[test]
     fn test_stage_6() {
         assert_eq!(match_pattern("\\d apple", "1 apple"), true, "Test 1");
@@ -306,7 +336,6 @@ mod tests {
             "Test 8"
         );
     }
-
     #[test]
     fn test_stage_7() {
         assert_eq!(match_pattern("^log", "log"), true, "Test 1");
@@ -318,7 +347,6 @@ mod tests {
         // assert_eq!(match_pattern("^ab", "abcd\nefgh"), true, "Test 7");
         // assert_eq!(match_pattern("^cd", "abcd\nefgh"), false, "Test 8");
     }
-
     #[test]
     fn test_stage_8() {
         assert_eq!(match_pattern("dog$", "dog"), true, "Test 1");
@@ -334,17 +362,16 @@ mod tests {
         assert_eq!(match_pattern("efgh$", "abcd\nefgh"), true, "Test 7");
         assert_eq!(match_pattern("abcd$", "abcd\nefgh"), false, "Test 8");
     }
-
-    // #[test]
-    // fn test_stage_9() {
-    //     assert_eq!(match_pattern("a+", "apple"), true, "Test 1");
-    //     assert_eq!(match_pattern("a+", "SaaS"), true, "Test 2");
-    //     assert_eq!(match_pattern("a+", "dog"), false, "Test 3");
-    //     assert_eq!(match_pattern("ca+ts", "cats"), true, "Test 4");
-    //     assert_eq!(match_pattern("ca+ts", "caats"), true, "Test 5");
-    //     assert_eq!(match_pattern("ca+ts", "caaaats"), true, "Test 6");
-    //     assert_eq!(match_pattern("ca+ts", "ctss"), false, "Test 7");
-    //     assert_eq!(match_pattern("ca+ts", "cass caats"), true, "Test 8");
-    //     // assert_eq!(match_pattern("^ca+ts", "cass caats"), false, "Test 9");
-    // }
+    #[test]
+    fn test_stage_9() {
+        // assert_eq!(match_pattern("a+", "apple"), true, "Test 1");
+        // assert_eq!(match_pattern("a+", "SaaS"), true, "Test 2");
+        // assert_eq!(match_pattern("a+", "dog"), false, "Test 3");
+        // assert_eq!(match_pattern("ca+ts", "cats"), true, "Test 4");
+        // assert_eq!(match_pattern("ca+ts", "caats"), true, "Test 5");
+        // assert_eq!(match_pattern("ca+ts", "caaaats"), true, "Test 6");
+        // assert_eq!(match_pattern("ca+ts", "ctss"), false, "Test 7");
+        assert_eq!(match_pattern("ca+ts", "cass caats"), true, "Test 8");
+        assert_eq!(match_pattern("^ca+ts", "cass caats"), false, "Test 9");
+    }
 }
