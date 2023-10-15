@@ -364,14 +364,15 @@ mod tests {
     }
     #[test]
     fn test_stage_9() {
-        // assert_eq!(match_pattern("a+", "apple"), true, "Test 1");
-        // assert_eq!(match_pattern("a+", "SaaS"), true, "Test 2");
-        // assert_eq!(match_pattern("a+", "dog"), false, "Test 3");
-        // assert_eq!(match_pattern("ca+ts", "cats"), true, "Test 4");
-        // assert_eq!(match_pattern("ca+ts", "caats"), true, "Test 5");
-        // assert_eq!(match_pattern("ca+ts", "caaaats"), true, "Test 6");
-        // assert_eq!(match_pattern("ca+ts", "ctss"), false, "Test 7");
+        assert_eq!(match_pattern("a+", "apple"), true, "Test 1");
+        assert_eq!(match_pattern("a+", "SaaS"), true, "Test 2");
+        assert_eq!(match_pattern("a+", "dog"), false, "Test 3");
+        assert_eq!(match_pattern("ca+ts", "cats"), true, "Test 4");
+        assert_eq!(match_pattern("ca+ts", "caats"), true, "Test 5");
+        assert_eq!(match_pattern("ca+ts", "caaaats"), true, "Test 6");
+        assert_eq!(match_pattern("ca+ts", "ctss"), false, "Test 7");
         assert_eq!(match_pattern("ca+ts", "cass caats"), true, "Test 8");
         assert_eq!(match_pattern("^ca+ts", "cass caats"), false, "Test 9");
     }
+
 }
