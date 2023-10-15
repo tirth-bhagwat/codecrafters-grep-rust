@@ -11,8 +11,14 @@ enum Mode {
 }
 #[derive(PartialEq)]
 enum MultipleMatch {
+    ZeroOrOne { matched_empty: bool },
     OneOrMore,
     One,
+}
+
+enum BreakWhat {
+    Inner(bool),
+    Outer,
 }
 
 fn match_pattern(pattern: &str, input_line: &str) -> bool {
@@ -63,6 +69,13 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                     i += 1;
                     MultipleMatch::OneOrMore
                 }
+                '?' => {
+                    i += 1;
+                    // match_only_next = true;
+                    MultipleMatch::ZeroOrOne {
+                        matched_empty: false,
+                    }
+                }
                 _ => MultipleMatch::One,
             };
         }
@@ -73,76 +86,28 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                 if j < inp_len {
                     let y = inp[j];
                     j += 1;
-                    match &mode {
-                        Mode::SameCharacter(ch) => {
-                            if &y == ch {
-                                match_only_next = true;
-                                chars_matched += 1;
-                                break 'inner true;
-                            } else if match_only_next {
-                                if chars_matched > 0 && multi_match == MultipleMatch::One {
-                                    reset_pattern = true;
-                                    j -= 1;
-                                    break 'outer;
-                                }
-                                break 'inner false;
+
+                    let condition = match &mode {
+                        Mode::SameCharacter(ch) => &y == ch,
+                        Mode::Alphanumeric => y.is_ascii_alphanumeric() || y == '_',
+                        Mode::PosCharGroup(accepted) => accepted.contains(&y),
+                        Mode::NegCharGroup(not_accepted) => !not_accepted.contains(&y),
+                        Mode::Number => y.is_ascii_digit(),
+                    };
+
+                    if let Some(val) = get_break_condition(
+                        condition,
+                        &mut match_only_next,
+                        &mut chars_matched,
+                        &mut multi_match,
+                        &mut reset_pattern,
+                        &mut j,
+                    ) {
+                        match val {
+                            BreakWhat::Inner(val) => {
+                                break 'inner val;
                             }
-                        }
-                        Mode::Alphanumeric => {
-                            if y.is_ascii_alphanumeric() || y == '_' {
-                                match_only_next = true;
-                                chars_matched += 1;
-                                break 'inner true;
-                            } else if match_only_next {
-                                if chars_matched > 0 && multi_match == MultipleMatch::One {
-                                    reset_pattern = true;
-                                    j -= 1;
-                                    break 'outer;
-                                }
-                                break 'inner false;
-                            }
-                        }
-                        Mode::PosCharGroup(accepted) => {
-                            if accepted.contains(&y) {
-                                match_only_next = true;
-                                chars_matched += 1;
-                                break 'inner true;
-                            } else if match_only_next {
-                                if chars_matched > 0 && multi_match == MultipleMatch::One {
-                                    reset_pattern = true;
-                                    j -= 1;
-                                    break 'outer;
-                                }
-                                break 'inner false;
-                            }
-                        }
-                        Mode::NegCharGroup(not_accepted) => {
-                            if !not_accepted.contains(&y) {
-                                match_only_next = true;
-                                chars_matched += 1;
-                                break 'inner true;
-                            } else if match_only_next {
-                                if chars_matched > 0 && multi_match == MultipleMatch::One {
-                                    reset_pattern = true;
-                                    j -= 1;
-                                    break 'outer;
-                                }
-                                break 'inner false;
-                            }
-                        }
-                        Mode::Number => {
-                            if y.is_ascii_digit() {
-                                match_only_next = true;
-                                chars_matched += 1;
-                                break 'inner true;
-                            } else if match_only_next {
-                                if chars_matched > 0 && multi_match == MultipleMatch::One {
-                                    reset_pattern = true;
-                                    j -= 1;
-                                    break 'outer;
-                                }
-                                break 'inner false;
-                            }
+                            BreakWhat::Outer => break 'outer,
                         }
                     }
                 } else {
@@ -164,6 +129,12 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                 }
                 MultipleMatch::OneOrMore => {
                     if matched > 0 && !tmp {
+                        j -= 1;
+                        break 'outer;
+                    }
+                }
+                MultipleMatch::ZeroOrOne { matched_empty: _ } => {
+                    if (matched == 0 || matched == 1) && !tmp {
                         j -= 1;
                         break 'outer;
                     }
@@ -246,6 +217,40 @@ fn get_mode(patt: &mut Vec<char>, x: char, i: &mut usize) -> Option<Mode> {
         }
         _ => Some(Mode::SameCharacter(x)),
     };
+}
+
+fn get_break_condition(
+    condition: bool,
+    match_only_next: &mut bool,
+    chars_matched: &mut usize,
+    multi_match: &mut MultipleMatch,
+    reset_pattern: &mut bool,
+    j: &mut usize,
+) -> Option<BreakWhat> {
+    if condition {
+        *match_only_next = true;
+        *chars_matched += 1;
+        return Some(BreakWhat::Inner(true));
+    } else if *match_only_next {
+        if *chars_matched > 0 && *multi_match == MultipleMatch::One {
+            *reset_pattern = true;
+            *j -= 1;
+            return Some(BreakWhat::Outer);
+        }
+        return Some(BreakWhat::Inner(false));
+    } else if let MultipleMatch::ZeroOrOne { matched_empty: val } = multi_match {
+        return match val {
+            false => {
+                *multi_match = MultipleMatch::ZeroOrOne {
+                    matched_empty: true,
+                };
+                Some(BreakWhat::Inner(true))
+            }
+            true => Some(BreakWhat::Inner(false)),
+        };
+    }
+
+    return None;
 }
 
 #[cfg(test)]
@@ -374,5 +379,19 @@ mod tests {
         assert_eq!(match_pattern("ca+ts", "cass caats"), true, "Test 8");
         assert_eq!(match_pattern("^ca+ts", "cass caats"), false, "Test 9");
     }
+    #[test]
+    fn test_stage_10() {
+        assert_eq!(match_pattern("a?", "apple"), true, "Test 1");
+        assert_eq!(match_pattern("a?", "SaaS"), false, "Test 2");
+        assert_eq!(match_pattern("ca?ts", "cats"), true, "Test 4");
+        assert_eq!(match_pattern("ca?ts", "caats"), false, "Test 5");
+        assert_eq!(match_pattern("ca?ts", "caaaats"), false, "Test 6");
+        assert_eq!(match_pattern("ca?ts", "cass cats"), true, "Test 8");
+        assert_eq!(match_pattern("ca?ts", "cass caats"), false, "Test 9");
+        assert_eq!(match_pattern("^ca?ts", "cass cats"), false, "Test 10");
 
+        assert_eq!(match_pattern("a?", "dog"), true, "Test 3");
+        assert_eq!(match_pattern("ca?ts", "cts"), true, "Test 7");
+        assert_eq!(match_pattern("ca?ts", "cass cts"), true, "Test 8a");
+    }
 }
