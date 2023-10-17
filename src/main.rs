@@ -2,12 +2,14 @@ use std::env;
 use std::io;
 use std::process;
 
+#[derive(PartialEq)]
 enum Mode {
     SameCharacter(char),
     Alphanumeric,
     PosCharGroup(Vec<char>),
     NegCharGroup(Vec<char>),
     Number,
+    Any,
 }
 #[derive(PartialEq)]
 enum MultipleMatch {
@@ -16,7 +18,8 @@ enum MultipleMatch {
     One,
 }
 
-enum BreakWhat {
+#[derive(PartialEq)]
+enum BreakLoop {
     Inner(bool),
     Outer,
 }
@@ -29,6 +32,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
 
     let mut chars_matched = 0_usize;
     let mut reset_pattern = false;
+    let mut starts_with = false;
 
     let mut match_only_next = false;
 
@@ -47,6 +51,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
         match x {
             '^' => {
                 match_only_next = true;
+                starts_with = true;
                 continue;
             }
             '$' => {
@@ -71,7 +76,6 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                 }
                 '?' => {
                     i += 1;
-                    // match_only_next = true;
                     MultipleMatch::ZeroOrOne {
                         matched_empty: false,
                     }
@@ -93,6 +97,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         Mode::PosCharGroup(accepted) => accepted.contains(&y),
                         Mode::NegCharGroup(not_accepted) => !not_accepted.contains(&y),
                         Mode::Number => y.is_ascii_digit(),
+                        Mode::Any => true,
                     };
 
                     if let Some(val) = get_break_condition(
@@ -102,12 +107,14 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         &mut multi_match,
                         &mut reset_pattern,
                         &mut j,
+                        &mode,
+                        starts_with
                     ) {
                         match val {
-                            BreakWhat::Inner(val) => {
+                            BreakLoop::Inner(val) => {
                                 break 'inner val;
                             }
-                            BreakWhat::Outer => break 'outer,
+                            BreakLoop::Outer => break 'outer,
                         }
                     }
                 } else {
@@ -128,14 +135,16 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                     }
                 }
                 MultipleMatch::OneOrMore => {
-                    if matched > 0 && !tmp {
+                    if (matched > 0 && !tmp) || j == inp_len {
                         j -= 1;
                         break 'outer;
                     }
                 }
-                MultipleMatch::ZeroOrOne { matched_empty: _ } => {
-                    if (matched == 0 || matched == 1) && !tmp {
-                        j -= 1;
+                MultipleMatch::ZeroOrOne { matched_empty } => {
+                    if (matched == 0 && !tmp) || matched == 1 || matched_empty {
+                        if !tmp || matched_empty {
+                            j -= 1;
+                        }
                         break 'outer;
                     }
                 }
@@ -173,6 +182,7 @@ fn main() {
 fn get_mode(patt: &mut Vec<char>, x: char, i: &mut usize) -> Option<Mode> {
     let patt_len = patt.len();
     return match x {
+        '.' => Some(Mode::Any),
         '\\' => {
             if *i < patt_len {
                 let u = patt[*i];
@@ -226,27 +236,49 @@ fn get_break_condition(
     multi_match: &mut MultipleMatch,
     reset_pattern: &mut bool,
     j: &mut usize,
-) -> Option<BreakWhat> {
+    mode: &Mode,
+    starts_with: bool,
+) -> Option<BreakLoop> {
+    if *mode == Mode::Any {
+        if let MultipleMatch::ZeroOrOne { matched_empty: val } = multi_match {
+            if starts_with {
+                return Some(BreakLoop::Inner(true));
+            }
+            return match val {
+                false => {
+                    *multi_match = MultipleMatch::ZeroOrOne {
+                        matched_empty: true,
+                    };
+                    *chars_matched += 1;
+                    Some(BreakLoop::Inner(true))
+                }
+                true => Some(BreakLoop::Inner(false)),
+            };
+        }
+    }
     if condition {
         *match_only_next = true;
         *chars_matched += 1;
-        return Some(BreakWhat::Inner(true));
+        return Some(BreakLoop::Inner(true));
     } else if *match_only_next {
         if *chars_matched > 0 && *multi_match == MultipleMatch::One {
             *reset_pattern = true;
             *j -= 1;
-            return Some(BreakWhat::Outer);
+            return Some(BreakLoop::Outer);
         }
-        return Some(BreakWhat::Inner(false));
-    } else if let MultipleMatch::ZeroOrOne { matched_empty: val } = multi_match {
+        return Some(BreakLoop::Inner(false));
+    }
+
+    if let MultipleMatch::ZeroOrOne { matched_empty: val } = multi_match {
         return match val {
             false => {
                 *multi_match = MultipleMatch::ZeroOrOne {
                     matched_empty: true,
                 };
-                Some(BreakWhat::Inner(true))
+                *chars_matched += 1;
+                Some(BreakLoop::Inner(true))
             }
-            true => Some(BreakWhat::Inner(false)),
+            true => Some(BreakLoop::Inner(false)),
         };
     }
 
@@ -378,11 +410,13 @@ mod tests {
         assert_eq!(match_pattern("ca+ts", "ctss"), false, "Test 7");
         assert_eq!(match_pattern("ca+ts", "cass caats"), true, "Test 8");
         assert_eq!(match_pattern("^ca+ts", "cass caats"), false, "Test 9");
+        assert_eq!(match_pattern("ca+ts$", "cass caats"), true, "Test 9a");
+        assert_eq!(match_pattern("ca+ts$", "cats cass"), false, "Test 9b");
     }
     #[test]
     fn test_stage_10() {
         assert_eq!(match_pattern("a?", "apple"), true, "Test 1");
-        assert_eq!(match_pattern("a?", "SaaS"), false, "Test 2");
+        assert_eq!(match_pattern("a?", "SaaS"), true, "Test 2");
         assert_eq!(match_pattern("ca?ts", "cats"), true, "Test 4");
         assert_eq!(match_pattern("ca?ts", "caats"), false, "Test 5");
         assert_eq!(match_pattern("ca?ts", "caaaats"), false, "Test 6");
@@ -393,5 +427,40 @@ mod tests {
         assert_eq!(match_pattern("a?", "dog"), true, "Test 3");
         assert_eq!(match_pattern("ca?ts", "cts"), true, "Test 7");
         assert_eq!(match_pattern("ca?ts", "cass cts"), true, "Test 8a");
+    }
+    #[test]
+    fn test_stage_11() {
+        assert_eq!(match_pattern("d.g", "dog"), true, "Test 1");
+        assert_eq!(match_pattern("d.g", "dug"), true, "Test 2");
+        assert_eq!(match_pattern("d.g", "d#g"), true, "Test 3");
+        assert_eq!(match_pattern("d.g", "dig"), true, "Test 4");
+        assert_eq!(match_pattern(".at", "cat"), true, "Test 5");
+        assert_eq!(match_pattern(".at", "bat"), true, "Test 6");
+        assert_eq!(match_pattern(".at", "rat"), true, "Test 7");
+        assert_eq!(match_pattern("b.t", "bat"), true, "Test 8");
+        assert_eq!(match_pattern("b.t", "btt"), true, "Test 9");
+        assert_eq!(match_pattern("b.t", "boot"), false, "Test 10");
+        assert_eq!(match_pattern("...", "abc"), true, "Test 11");
+        assert_eq!(match_pattern("...", "!@#"), true, "Test 13");
+
+        assert_eq!(match_pattern(".+", "apple"), true, "Test 15");
+        assert_eq!(match_pattern(".+", "123"), true, "Test 16");
+        assert_eq!(match_pattern(".+", "!@#"), true, "Test 17");
+
+        assert_eq!(match_pattern("x.y", "xyz"), false, "Test 19");
+        assert_eq!(match_pattern("x.y", "xty"), true, "Test 20");
+        assert_eq!(match_pattern("x.y", "x1y"), true, "Test 21");
+        assert_eq!(match_pattern("x.y", "xy"), false, "Test 22");
+
+        assert_eq!(match_pattern(".?at", "cat"), true, "Test 23");
+        assert_eq!(match_pattern(".?at", "bat"), true, "Test 24");
+        assert_eq!(match_pattern(".?at", "rrrat"), true, "Test 25");
+        assert_eq!(match_pattern("^.?at", "rrrat"), false, "Test 25b");
+        assert_eq!(match_pattern(".?at$", "rrrat"), true, "Test 25c");
+        assert_eq!(match_pattern(".?at$", "ratat"), true, "Test 25d");
+        assert_eq!(match_pattern(".?at$", "rataq"), false, "Test 25e");
+        assert_eq!(match_pattern(".?at", "at"), true, "Test 26");
+        assert_eq!(match_pattern(".?at", "hhh"), false, "Test 27");
+        assert_eq!(match_pattern("a.b.c.", "adbecf"), true, "Test 28");
     }
 }
