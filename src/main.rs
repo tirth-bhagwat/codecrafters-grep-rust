@@ -1,3 +1,5 @@
+mod tests;
+
 use std::env;
 use std::io;
 use std::process;
@@ -24,13 +26,13 @@ enum BreakLoop {
     Outer,
 }
 
-fn match_pattern(pattern: &str, input_line: &str) -> bool {
+fn match_pattern(pattern: &str, input_line: &str) -> Option<String> {
     let inp: Vec<char> = input_line.chars().collect();
     let mut patt: Vec<char> = pattern.chars().collect();
     let inp_len = inp.len();
     let patt_len = patt.len();
 
-    let mut chars_matched = 0_usize;
+    let mut chars_matched = "".to_string();
     let mut reset_pattern = false;
     let mut starts_with = false;
 
@@ -42,7 +44,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
         if reset_pattern {
             i = 0;
             reset_pattern = false;
-            chars_matched = 0;
+            chars_matched = "".to_string();
             match_only_next = false;
         }
 
@@ -55,37 +57,40 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                 continue;
             }
             '$' => {
-                return if chars_matched > 0 && j >= inp_len {
-                    true
+                return if chars_matched.len() > 0 && j >= inp_len {
+                    Some(chars_matched)
                 } else if j < inp_len {
                     reset_pattern = true;
+                    j -= 1;
                     continue;
                 } else {
-                    false
+                    None
                 }
             }
             _ => {}
         }
 
-        let mut multi_match = MultipleMatch::One;
-        if i < patt_len {
-            multi_match = match patt[i] {
-                '+' => {
-                    i += 1;
-                    MultipleMatch::OneOrMore
-                }
-                '?' => {
-                    i += 1;
-                    MultipleMatch::ZeroOrOne {
-                        matched_empty: false,
-                    }
-                }
-                _ => MultipleMatch::One,
-            };
-        }
-
+        let mut multi_match = None;
         let mut matched = 0_usize;
         'outer: while let Some(mode) = get_mode(&mut patt, x, &mut i) {
+            if i < patt_len && multi_match.is_none() {
+                multi_match = Some(match patt[i] {
+                    '+' => {
+                        i += 1;
+                        MultipleMatch::OneOrMore
+                    }
+                    '?' => {
+                        i += 1;
+                        MultipleMatch::ZeroOrOne {
+                            matched_empty: false,
+                        }
+                    }
+                    _ => MultipleMatch::One,
+                });
+            } else if i == patt_len && multi_match.is_none() {
+                multi_match = Some(MultipleMatch::One);
+            }
+
             let tmp = 'inner: loop {
                 if j < inp_len {
                     let y = inp[j];
@@ -101,6 +106,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                     };
 
                     if let Some(val) = get_break_condition(
+                        &inp,
                         condition,
                         &mut match_only_next,
                         &mut chars_matched,
@@ -108,7 +114,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         &mut reset_pattern,
                         &mut j,
                         &mode,
-                        starts_with
+                        starts_with,
                     ) {
                         match val {
                             BreakLoop::Inner(val) => {
@@ -118,7 +124,7 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         }
                     }
                 } else {
-                    return false;
+                    return None;
                 }
             };
 
@@ -127,20 +133,20 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
             }
 
             match multi_match {
-                MultipleMatch::One => {
+                Some(MultipleMatch::One) => {
                     if tmp {
                         break 'outer;
                     } else {
-                        return false;
+                        return None;
                     }
                 }
-                MultipleMatch::OneOrMore => {
+                Some(MultipleMatch::OneOrMore) => {
                     if (matched > 0 && !tmp) || j == inp_len {
                         j -= 1;
                         break 'outer;
                     }
                 }
-                MultipleMatch::ZeroOrOne { matched_empty } => {
+                Some(MultipleMatch::ZeroOrOne { matched_empty }) => {
                     if (matched == 0 && !tmp) || matched == 1 || matched_empty {
                         if !tmp || matched_empty {
                             j -= 1;
@@ -148,11 +154,14 @@ fn match_pattern(pattern: &str, input_line: &str) -> bool {
                         break 'outer;
                     }
                 }
+                None => {
+                    unreachable!()
+                }
             }
         }
     }
 
-    true
+    Some(chars_matched)
 }
 
 // Usage: echo <input_text> | your_grep.sh -E <pattern>
@@ -170,7 +179,7 @@ fn main() {
 
     io::stdin().read_line(&mut input_line).unwrap();
 
-    if match_pattern(&pattern, &input_line) {
+    if match_pattern(&pattern, &input_line).is_some() {
         println!("Pass");
         process::exit(0)
     } else {
@@ -230,26 +239,27 @@ fn get_mode(patt: &mut Vec<char>, x: char, i: &mut usize) -> Option<Mode> {
 }
 
 fn get_break_condition(
+    input_line: &Vec<char>,
     condition: bool,
     match_only_next: &mut bool,
-    chars_matched: &mut usize,
-    multi_match: &mut MultipleMatch,
+    chars_matched: &mut String,
+    multi_match: &mut Option<MultipleMatch>,
     reset_pattern: &mut bool,
     j: &mut usize,
     mode: &Mode,
     starts_with: bool,
 ) -> Option<BreakLoop> {
     if *mode == Mode::Any {
-        if let MultipleMatch::ZeroOrOne { matched_empty: val } = multi_match {
+        if let Some(MultipleMatch::ZeroOrOne { matched_empty: val }) = multi_match {
             if starts_with {
                 return Some(BreakLoop::Inner(true));
             }
             return match val {
                 false => {
-                    *multi_match = MultipleMatch::ZeroOrOne {
+                    *multi_match = Some(MultipleMatch::ZeroOrOne {
                         matched_empty: true,
-                    };
-                    *chars_matched += 1;
+                    });
+                    (*chars_matched).push(input_line[*j - 1]);
                     Some(BreakLoop::Inner(true))
                 }
                 true => Some(BreakLoop::Inner(false)),
@@ -258,10 +268,10 @@ fn get_break_condition(
     }
     if condition {
         *match_only_next = true;
-        *chars_matched += 1;
+        (*chars_matched).push(input_line[*j - 1]);
         return Some(BreakLoop::Inner(true));
     } else if *match_only_next {
-        if *chars_matched > 0 && *multi_match == MultipleMatch::One {
+        if (*chars_matched).len() > 0 && *multi_match == Some(MultipleMatch::One) {
             *reset_pattern = true;
             *j -= 1;
             return Some(BreakLoop::Outer);
@@ -269,13 +279,13 @@ fn get_break_condition(
         return Some(BreakLoop::Inner(false));
     }
 
-    if let MultipleMatch::ZeroOrOne { matched_empty: val } = multi_match {
+    if let Some(MultipleMatch::ZeroOrOne { matched_empty: val }) = multi_match {
         return match val {
             false => {
-                *multi_match = MultipleMatch::ZeroOrOne {
+                *multi_match = Some(MultipleMatch::ZeroOrOne {
                     matched_empty: true,
-                };
-                *chars_matched += 1;
+                });
+                (*chars_matched).push(input_line[*j - 1]);
                 Some(BreakLoop::Inner(true))
             }
             true => Some(BreakLoop::Inner(false)),
@@ -283,184 +293,4 @@ fn get_break_condition(
     }
 
     return None;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_stage_1() {
-        assert_eq!(match_pattern("abc", "abc"), true, "Test 1");
-        assert_eq!(match_pattern("abc", "aibic"), false, "Test 2");
-        assert_eq!(match_pattern("abc", "aaibicj"), false, "Test 3");
-        assert_eq!(match_pattern("abc", "aabcibicj"), true, "Test 3b");
-        assert_eq!(match_pattern("abc", "abcdef"), true, "Test 4");
-        assert_eq!(match_pattern("abc", "defabc"), true, "Test 5");
-        assert_eq!(match_pattern("abc", "defabcdef"), true, "Test 6");
-    }
-    #[test]
-    fn test_stage_2() {
-        assert_eq!(match_pattern("\\d", "12345"), true, "Test 1");
-        assert_eq!(match_pattern("\\d", "abc"), false, "Test 2");
-        assert_eq!(match_pattern("\\d", "apple123"), true, "Test 3");
-        assert_eq!(match_pattern("\\d", "123apple"), true, "Test 4");
-        assert_eq!(match_pattern("\\d", "apple"), false, "Test 5");
-        assert_eq!(match_pattern("\\d", "123"), true, "Test 6");
-        assert_eq!(match_pattern("\\d", "a1b2c3"), true, "Test 7");
-        assert_eq!(match_pattern("\\d", "a1b2c"), true, "Test 8");
-    }
-    #[test]
-    fn test_stage_3() {
-        assert_eq!(match_pattern("\\w", "foo101"), true, "Test 1");
-        assert_eq!(match_pattern("\\w", "$!?"), false, "Test 2");
-        assert_eq!(match_pattern("\\w", "alpha-num3ric"), true, "Test 3");
-        assert_eq!(match_pattern("\\w", "_underscore"), true, "Test 4");
-        assert_eq!(match_pattern("\\w", "%:'"), false, "Test 5");
-        assert_eq!(match_pattern("\\w", "12345"), true, "Test 6");
-        assert_eq!(match_pattern("\\w", "AbC"), true, "Test 7");
-        assert_eq!(match_pattern("\\w", "_"), true, "Test 8");
-        assert_eq!(match_pattern("\\w", "a"), true, "Test 9");
-        assert_eq!(match_pattern("\\w", "9"), true, "Test 10");
-        assert_eq!(match_pattern("\\w", "!"), false, "Test 11");
-    }
-    #[test]
-    fn test_stage_4() {
-        assert_eq!(match_pattern("[abc]", "apple"), true, "Test 1");
-        assert_eq!(match_pattern("[123]", "apple"), false, "Test 2");
-        assert_eq!(match_pattern("[xyz]", "XYZ"), false, "Test 3");
-        assert_eq!(match_pattern("[aeiou]", "consonants"), true, "Test 4");
-        assert_eq!(match_pattern("[aeiou]", "rhythm"), false, "Test 5");
-        assert_eq!(
-            match_pattern("[aeiou][aeiou]", "consonants"),
-            false,
-            "Test 6"
-        );
-        // assert_eq!(match_pattern("[a-z]", "abcdefg"), true, "Extra_1");
-        // assert_eq!(match_pattern("[0-9]", "alpha123"), true, "Extra_2");
-    }
-    #[test]
-    fn test_stage_5() {
-        assert_eq!(match_pattern("[^abc]", "dog"), true, "Test 1");
-        assert_eq!(match_pattern("[^abc]", "cab"), false, "Test 2");
-        assert_eq!(match_pattern("[^pqr]", "apple"), true, "Test 3");
-        assert_eq!(
-            match_pattern("[^aeiou][^aeiou]", "consonants"),
-            true,
-            "Test 4"
-        );
-        assert_eq!(match_pattern("[^aeiou]", "rhythm"), true, "Test 5");
-        assert_eq!(match_pattern("[^123]", "456"), true, "Test 6");
-        // assert_eq!(match_pattern("[^a-z]", "123"), true, "Extra_1");
-        // assert_eq!(match_pattern("[^0-9]", "alpha"), true, "Extra_2");
-    }
-    #[test]
-    fn test_stage_6() {
-        assert_eq!(match_pattern("\\d apple", "1 apple"), true, "Test 1");
-        assert_eq!(match_pattern("\\d apple", "1 orange"), false, "Test 2");
-        assert_eq!(
-            match_pattern("\\d\\d\\d apple", "100 apples"),
-            true,
-            "Test 3"
-        );
-        assert_eq!(match_pattern("\\d\\d\\d apple", "1 apple"), false, "Test 4");
-        assert_eq!(match_pattern("\\d \\w\\w\\ws", "3 dogs"), true, "Test 5");
-        assert_eq!(match_pattern("\\d \\w\\w\\ws", "4 cats"), true, "Test 6");
-        assert_eq!(match_pattern("\\d \\w\\w\\ws", "1 dog"), false, "Test 7");
-        assert_eq!(
-            match_pattern("\\d\\w\\w\\w apple", "1dog apple"),
-            true,
-            "Test 8"
-        );
-    }
-    #[test]
-    fn test_stage_7() {
-        assert_eq!(match_pattern("^log", "log"), true, "Test 1");
-        assert_eq!(match_pattern("^log", "slog"), false, "Test 2");
-        assert_eq!(match_pattern("^apple", "apple pie"), true, "Test 3");
-        assert_eq!(match_pattern("^apple", "pie apple"), false, "Test 4");
-        assert_eq!(match_pattern("^123", "123456"), true, "Test 5");
-        assert_eq!(match_pattern("^123", "456123"), false, "Test 6");
-        // assert_eq!(match_pattern("^ab", "abcd\nefgh"), true, "Test 7");
-        // assert_eq!(match_pattern("^cd", "abcd\nefgh"), false, "Test 8");
-    }
-    #[test]
-    fn test_stage_8() {
-        assert_eq!(match_pattern("dog$", "dog"), true, "Test 1");
-        assert_eq!(match_pattern("^dog$", "dog"), true, "Test 1a");
-        assert_eq!(match_pattern("dog$", "dogs"), false, "Test 2");
-        assert_eq!(match_pattern("pie$", "apple pie"), true, "Test 3");
-        assert_eq!(match_pattern("^pie$", "apple pie"), false, "Test 3a");
-        assert_eq!(match_pattern("apple$", "pie apple"), true, "Test 4");
-        assert_eq!(match_pattern("apple$", "pie apple appl"), false, "Test 4a");
-        assert_eq!(match_pattern("apple$", "pie apple apple"), true, "Test 4b");
-        assert_eq!(match_pattern("123$", "123456"), false, "Test 5");
-        assert_eq!(match_pattern("123$", "456123"), true, "Test 6");
-        assert_eq!(match_pattern("efgh$", "abcd\nefgh"), true, "Test 7");
-        assert_eq!(match_pattern("abcd$", "abcd\nefgh"), false, "Test 8");
-    }
-    #[test]
-    fn test_stage_9() {
-        assert_eq!(match_pattern("a+", "apple"), true, "Test 1");
-        assert_eq!(match_pattern("a+", "SaaS"), true, "Test 2");
-        assert_eq!(match_pattern("a+", "dog"), false, "Test 3");
-        assert_eq!(match_pattern("ca+ts", "cats"), true, "Test 4");
-        assert_eq!(match_pattern("ca+ts", "caats"), true, "Test 5");
-        assert_eq!(match_pattern("ca+ts", "caaaats"), true, "Test 6");
-        assert_eq!(match_pattern("ca+ts", "ctss"), false, "Test 7");
-        assert_eq!(match_pattern("ca+ts", "cass caats"), true, "Test 8");
-        assert_eq!(match_pattern("^ca+ts", "cass caats"), false, "Test 9");
-        assert_eq!(match_pattern("ca+ts$", "cass caats"), true, "Test 9a");
-        assert_eq!(match_pattern("ca+ts$", "cats cass"), false, "Test 9b");
-    }
-    #[test]
-    fn test_stage_10() {
-        assert_eq!(match_pattern("a?", "apple"), true, "Test 1");
-        assert_eq!(match_pattern("a?", "SaaS"), true, "Test 2");
-        assert_eq!(match_pattern("ca?ts", "cats"), true, "Test 4");
-        assert_eq!(match_pattern("ca?ts", "caats"), false, "Test 5");
-        assert_eq!(match_pattern("ca?ts", "caaaats"), false, "Test 6");
-        assert_eq!(match_pattern("ca?ts", "cass cats"), true, "Test 8");
-        assert_eq!(match_pattern("ca?ts", "cass caats"), false, "Test 9");
-        assert_eq!(match_pattern("^ca?ts", "cass cats"), false, "Test 10");
-
-        assert_eq!(match_pattern("a?", "dog"), true, "Test 3");
-        assert_eq!(match_pattern("ca?ts", "cts"), true, "Test 7");
-        assert_eq!(match_pattern("ca?ts", "cass cts"), true, "Test 8a");
-    }
-    #[test]
-    fn test_stage_11() {
-        assert_eq!(match_pattern("d.g", "dog"), true, "Test 1");
-        assert_eq!(match_pattern("d.g", "dug"), true, "Test 2");
-        assert_eq!(match_pattern("d.g", "d#g"), true, "Test 3");
-        assert_eq!(match_pattern("d.g", "dig"), true, "Test 4");
-        assert_eq!(match_pattern(".at", "cat"), true, "Test 5");
-        assert_eq!(match_pattern(".at", "bat"), true, "Test 6");
-        assert_eq!(match_pattern(".at", "rat"), true, "Test 7");
-        assert_eq!(match_pattern("b.t", "bat"), true, "Test 8");
-        assert_eq!(match_pattern("b.t", "btt"), true, "Test 9");
-        assert_eq!(match_pattern("b.t", "boot"), false, "Test 10");
-        assert_eq!(match_pattern("...", "abc"), true, "Test 11");
-        assert_eq!(match_pattern("...", "!@#"), true, "Test 13");
-
-        assert_eq!(match_pattern(".+", "apple"), true, "Test 15");
-        assert_eq!(match_pattern(".+", "123"), true, "Test 16");
-        assert_eq!(match_pattern(".+", "!@#"), true, "Test 17");
-
-        assert_eq!(match_pattern("x.y", "xyz"), false, "Test 19");
-        assert_eq!(match_pattern("x.y", "xty"), true, "Test 20");
-        assert_eq!(match_pattern("x.y", "x1y"), true, "Test 21");
-        assert_eq!(match_pattern("x.y", "xy"), false, "Test 22");
-
-        assert_eq!(match_pattern(".?at", "cat"), true, "Test 23");
-        assert_eq!(match_pattern(".?at", "bat"), true, "Test 24");
-        assert_eq!(match_pattern(".?at", "rrrat"), true, "Test 25");
-        assert_eq!(match_pattern("^.?at", "rrrat"), false, "Test 25b");
-        assert_eq!(match_pattern(".?at$", "rrrat"), true, "Test 25c");
-        assert_eq!(match_pattern(".?at$", "ratat"), true, "Test 25d");
-        assert_eq!(match_pattern(".?at$", "rataq"), false, "Test 25e");
-        assert_eq!(match_pattern(".?at", "at"), true, "Test 26");
-        assert_eq!(match_pattern(".?at", "hhh"), false, "Test 27");
-        assert_eq!(match_pattern("a.b.c.", "adbecf"), true, "Test 28");
-    }
 }
